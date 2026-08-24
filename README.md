@@ -131,6 +131,14 @@ Comment lire ces résultats, en quatre constats :
   (`results/figures/cpcv_*.png`), et la PBO basse (0,00 à 0,01) dit seulement que ce classement interne est
   stable, pas qu'il est bon.
 
+- **Le petit R² positif des arbres n'est pas du talent de classement.** Un test placebo le montre : en
+  mélangeant aléatoirement les cibles (plus aucun lien entre variables et rendements), les Extra Trees
+  gardent un R² hors échantillon de +0,009, identique à celui obtenu sur les vraies cibles (+0,009). En
+  effet, le R² à la Gu-Kelly-Xiu se mesure contre la prévision zéro : un modèle très régularisé qui prédit
+  simplement « les rendements sont en moyenne positifs » marque ces points sans classer les titres. Le
+  portefeuille long short, qui neutralise ce niveau moyen, remet les compteurs à leur vraie valeur : autour
+  de zéro.
+
 En une phrase : **avec l'information réellement disponible, des réglages choisis sans tricher et des coûts
 payés, la prédiction mensuelle macro + momentum ne bat pas un portefeuille naïf sur 2008-2024** ; c'est la
 réponse, plus modeste mais solide, à la question du mémoire.
