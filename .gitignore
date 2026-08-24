@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.DS_Store
+*.egg-info/
+dist/
+build/
+# Données brutes (Yahoo usage personnel, LCDMA et FRED-MD à télécharger : voir scripts/fetch_data.py)
+data/raw/*
+!data/raw/.gitkeep
+data/panel/
+logs/
