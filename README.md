@@ -9,13 +9,12 @@ porte maintenant sa probabilité de n'être que du bruit.
 ![python](https://img.shields.io/badge/python-3.12-blue)
 ![licence](https://img.shields.io/badge/code-MIT-green)
 
-**Résultat en une phrase (premiers chiffres, protocole rapide, à confirmer par le protocole complet en
-cours).** Une fois l'information réellement disponible au moment de décider, les hyperparamètres choisis
-hors de la période de test et les coûts de transaction facturés, **aucun modèle ne bat le simple
-portefeuille équipondéré** sur les actions américaines 2008-2024 (équipondéré : Sharpe 0,72 ; meilleur
-modèle net de coûts : 0,00 ; la rotation d'environ 2 par mois coûte à elle seule 2,4 % par an). C'est la
-conclusion honnête que la version 1 du mémoire ne pouvait pas voir, et c'est exactement ce que la
-littérature récente prédit (Jensen, Kelly, Malamud et Pedersen, 2026).
+**Résultat en une phrase (mesuré, protocole complet).** Une fois l'information réellement disponible au
+moment de décider, les hyperparamètres choisis hors de la période de test et les coûts payés, **aucun des
+huit modèles ne bat le portefeuille équipondéré, ni au Canada ni aux États-Unis** (meilleur modèle : 4,1 %
+net par an, Sharpe 0,31, Sharpe déflaté 0,86 ; équipondéré canadien : 11,4 %, Sharpe 0,85) ; la rotation de
+2 à 3 par mois coûte plus que le signal extrait, exactement le mécanisme décrit par Jensen, Kelly, Malamud
+et Pedersen (2026).
 
 *English summary.* My 2024 MSc thesis asked whether machine learning fed with macroeconomic data predicts
 Canadian and US stock returns, and whether long short portfolios built on those predictions make money.
@@ -23,8 +22,7 @@ This repository re-answers the question with 2026 best practices: real-time info
 hyperparameters selected on a pre-test validation window and then frozen, per-stock characteristics
 (momentum, volatility) interacted with macro factors learned inside each fold, combinatorial purged
 cross-validation with embargo, net-of-cost portfolios, Newey-West t-statistics, deflated Sharpe ratios and
-the probability of backtest overfitting. First (fast-protocol) result: net of 10 bp costs, nothing beats
-the equal-weight benchmark on US stocks; full results are computing.
+the probability of backtest overfitting. Full-protocol result: net of 10 bp costs, no model beats the equal-weight benchmark in either country (best: Canadian gradient boosting, 4.1 % net CAGR, deflated Sharpe 0.86 vs 0.95 needed); turnover of 2-3 per month costs more than the signal extracted.
 
 ## 1. Pourquoi une version 2
 
@@ -71,23 +69,71 @@ standardisées). Tout est scikit-learn : pas de dépendance fragile.
 5. **Ne croire un Sharpe que déflaté.** Chaque Sharpe net est accompagné de sa t-stat Newey-West et de son
    Sharpe déflaté ; la grille entière passe à la PBO.
 
-## 4. Premiers résultats (mesurés, protocole rapide : ridge et gradient boosting, États-Unis)
+## 4. Les résultats complets (mesurés, walk-forward 2008-2024, nets de 10 pb)
 
-| Portefeuille | TCAC net | Sharpe net | Perte max. | Rotation/mois |
-|---|---:|---:|---:|---:|
-| Ridge | −2,9 % | −0,12 | −49,8 % | 2,0 |
-| Hist Gradient Boosting | −6,0 % | −0,34 | −75,9 % | 2,5 |
-| Ensemble | −1,4 % | −0,03 | −54,3 % | 2,2 |
-| Contrôle momentum/volatilité (sans apprentissage) | −5,6 % | −0,57 | −60,4 % | 1,7 |
-| **Équipondéré long only** | **10,6 %** | **0,72** | −37,3 % | |
+Sept familles de modèles plus l'ensemble, hyperparamètres gelés sur 2004-2007, réentraînement annuel.
+Le DSR est le Sharpe déflaté : la probabilité que le Sharpe survive aux 27 essais de réglages tentés ;
+au-dessus de 0,95, on peut y croire. Chiffres copiés de `results/tables/walk_forward_*.csv`.
 
-Comment lire ce tableau, en deux constats : d'abord, la rotation de 2 par mois facturée à 10 pb coûte
-environ 2,4 % par an, ce qui suffit à effacer le peu de signal ; ensuite, le contrôle sans apprentissage
-fait aussi mal que les modèles, signe qu'il n'y a pas, dans ces données mensuelles, de structure
-exploitable après coûts. Le R² de validation le plus élevé revient d'ailleurs aux Extra Trees (0,02) et au
-ridge à traits aléatoires (0,016) : positif, mais minuscule. Le protocole complet (7 familles, ensemble,
-CPCV, PBO, volet canadien) tourne au moment d'écrire ces lignes ; ce tableau sera remplacé par les
-résultats complets, avec les figures.
+**États-Unis (50 titres S&P 500).**
+
+| Portefeuille | R² HÉ | TCAC net | Sharpe net | Rotation/mois | DSR |
+|---|---:|---:|---:|---:|---:|
+| Ridge | −0,17 | −2,9 % | −0,12 | 2,0 | 0,29 |
+| Filet élastique | −0,01 | 1,1 % | 0,27 | 0,2 | 0,81 |
+| Forêt aléatoire | −0,02 | −1,4 % | −0,03 | 2,2 | 0,45 |
+| Extra Trees | −0,04 | −4,8 % | −0,28 | 2,3 | 0,11 |
+| Hist Gradient Boosting | −0,22 | −6,0 % | −0,34 | 2,5 | 0,06 |
+| Perceptron (MLP) | −3,20 | −3,2 % | −0,21 | 2,8 | 0,17 |
+| Ridge à traits aléatoires (RFF) | 0,01 | −10,7 % | −1,12 | 3,2 | 0,00 |
+| Ensemble | | −2,3 % | −0,10 | 2,3 | 0,32 |
+| Contrôle momentum/volatilité | | −5,6 % | −0,57 | 1,7 | |
+| **Équipondéré long only** | | **10,6 %** | **0,72** | | |
+
+**Canada (50 titres TSX).**
+
+| Portefeuille | R² HÉ | TCAC net | Sharpe net | Rotation/mois | DSR |
+|---|---:|---:|---:|---:|---:|
+| Ridge | −0,03 | −1,2 % | 0,06 | 2,6 | 0,58 |
+| Filet élastique | 0,01 | −2,3 % | −0,27 | 0,1 | 0,07 |
+| Forêt aléatoire | 0,02 | 3,3 % | 0,27 | 2,7 | 0,82 |
+| Extra Trees | 0,01 | 2,2 % | 0,21 | 2,5 | 0,76 |
+| Hist Gradient Boosting | 0,00 | 4,1 % | 0,31 | 2,7 | 0,86 |
+| Perceptron (MLP) | −1,05 | 0,4 % | 0,11 | 3,1 | 0,64 |
+| Ridge à traits aléatoires (RFF) | 0,01 | −8,0 % | −0,63 | 3,2 | 0,00 |
+| Ensemble | | 1,1 % | 0,16 | 2,7 | 0,70 |
+| Contrôle momentum/volatilité | | −0,8 % | 0,01 | 1,6 | |
+| **Équipondéré long only** | | **11,4 %** | **0,85** | | |
+
+![Croissance nette, États-Unis](results/figures/richesse_nette_usa.png)
+
+![Croissance nette, Canada](results/figures/richesse_nette_canada.png)
+
+Comment lire ces résultats, en quatre constats :
+
+- **Aucun modèle ne bat l'équipondéré, dans aucun des deux pays.** Le meilleur cas est le gradient
+  boosting canadien : 4,1 % net par an (Sharpe 0,31, t de Newey-West 1,33, DSR 0,86), contre 11,4 %
+  (Sharpe 0,85) pour le simple équipondéré. Aucun DSR n'atteint 0,95 : aucun Sharpe ne survit à la
+  correction du nombre d'essais.
+- **La rotation est le tueur.** Les modèles rebrassent 2 à 3 fois le portefeuille chaque mois ; à 10 points
+  de base, cela coûte 2,5 à 4 % par an, plus que le signal qu'ils extraient. Le ridge à traits aléatoires
+  (le « virtue of complexity » de Kelly, Malamud et Zhou, 2024) est le cas extrême : ses prédictions
+  changent sans cesse, rotation de 3,2, et il finit dernier des deux pays, exactement la mécanique
+  d'échec décrite par Jensen, Kelly, Malamud et Pedersen (2026) et le soupçon de Nagel (2025).
+- **La ligne plate du filet élastique américain n'est pas une victoire.** Sa pénalité L1 annule presque
+  tous les coefficients, ses prédictions deviennent égales entre titres, et le garde-fou anti-classement-
+  alphabétique le sort alors du marché : son Sharpe de 0,27 est surtout celui de ne rien faire. La v1 aurait
+  affiché ce modèle comme gagnant ; la v2 montre qu'il est vide.
+- **Le Canada ressort mieux que les États-Unis** (les arbres y sont tous positifs nets, R² HÉ légèrement
+  positifs), ce qui rejoint l'intuition du mémoire : un marché plus petit, moins arbitré, laisse un peu plus
+  de prévisibilité ; mais « un peu plus » reste sous le repère passif, et la validation croisée purgée le
+  confirme : sur les 28 chemins CPCV, les boîtes de tous les modèles chevauchent zéro
+  (`results/figures/cpcv_*.png`), et la PBO basse (0,00 à 0,01) dit seulement que ce classement interne est
+  stable, pas qu'il est bon.
+
+En une phrase : **avec l'information réellement disponible, des réglages choisis sans tricher et des coûts
+payés, la prédiction mensuelle macro + momentum ne bat pas un portefeuille naïf sur 2008-2024** ; c'est la
+réponse, plus modeste mais solide, à la question du mémoire.
 
 ## 5. Reproduire
 
