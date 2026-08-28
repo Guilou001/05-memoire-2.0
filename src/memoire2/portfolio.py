@@ -13,7 +13,6 @@ est neutralisée (aucune position) au lieu de sélectionner les titres par ordre
 
 from __future__ import annotations
 
-import numpy as np
 import pandas as pd
 
 
@@ -55,12 +54,19 @@ def long_short_returns(predictions: pd.DataFrame, realized: pd.DataFrame, quanti
     return pd.DataFrame(rows).set_index("date")
 
 
-def momentum_vol_benchmark(panel: pd.DataFrame, quantile: float = 0.2, fee: float = 0.001) -> pd.DataFrame:
-    """Le contrôle de Nagel (2025) : classer par momentum / volatilité, sans aucun apprentissage.
+def momentum_vol_benchmark(panel: pd.DataFrame, mom_raw: pd.DataFrame, vol_raw: pd.DataFrame,
+                           quantile: float = 0.2, fee: float = 0.001) -> pd.DataFrame:
+    """Le contrôle de Nagel (2025) : classer par momentum BRUT / volatilité BRUTE, sans apprentissage.
 
     Si un modèle complexe ne bat pas ce classement mécanique, son gain n'est pas de la structure apprise.
+    Le score se calcule sur ``mom_raw`` et ``vol_raw`` (dates x titres), les valeurs recalculées depuis les
+    prix, et jamais sur les colonnes du panel : celles-ci sont des rangs transversaux dans [-0,5 ; 0,5],
+    et le ratio de deux rangs n'est pas le signal (division par des rangs proches de zéro, corrélation de
+    rang de 0,03 à 0,07 avec le vrai ratio, mesurée lors de l'audit du 2026-08-28). Le panel ne sert ici
+    qu'à restreindre le contrôle aux mêmes couples (date, titre) que ceux vus par les modèles.
     """
-    score = panel["mom_12_2"] / panel["vol_12m"].replace(0, np.nan)
-    predictions = score.unstack("ticker")
     realized = panel["target"].unstack("ticker")
-    return long_short_returns(predictions, realized, quantile, fee)
+    available = panel["mom_12_2"].unstack("ticker").notna()
+    score = mom_raw / vol_raw.where(vol_raw > 0)
+    score = score.reindex(index=realized.index, columns=realized.columns).where(available)
+    return long_short_returns(score, realized, quantile, fee)

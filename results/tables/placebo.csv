@@ -1,0 +1,2 @@
+country,model,seed,r2_oos_reel,r2_oos_placebo,source_reel,protocole
+canada,extra_trees,123,0.014304011438222575,0.012991575139891909,predictions_canada.parquet,"cibles permutées sur tout le panel, réglages regelés sur 2004-2007, walk-forward 2008-2024"

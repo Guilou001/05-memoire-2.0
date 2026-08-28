@@ -7,7 +7,7 @@ import pytest
 from memoire2 import metrics as mx
 from memoire2.data import month_start_prices, monthly_returns
 from memoire2.panel import rank_normalize
-from memoire2.portfolio import long_short_returns, quantile_weights
+from memoire2.portfolio import long_short_returns, momentum_vol_benchmark, quantile_weights
 from memoire2.validation import contiguous_groups, cpcv_splits, purge_train_dates, walk_forward_splits
 
 
@@ -98,6 +98,41 @@ def test_constant_predictions_give_no_position():
     assert quantile_weights(pred).abs().sum() == 0.0
 
 
+def test_momentum_vol_benchmark_ranks_on_raw_signal_not_on_panel_ranks():
+    # cinq titres, un mois : A a le plus fort momentum brut et la plus faible volatilité brute, E l'inverse.
+    # Le panel porte des rangs DÉLIBÉRÉMENT inversés : si le contrôle les utilisait, il serait short A.
+    dates = pd.to_datetime(["2020-01-01"])
+    tickers = list("ABCDE")
+    idx = pd.MultiIndex.from_product([dates, tickers], names=["date", "ticker"])
+    panel = pd.DataFrame({
+        "mom_12_2": [-0.5, -0.25, 0.0, 0.25, 0.5],          # rangs inversés par rapport au signal brut
+        "vol_12m": [0.5, 0.25, 0.0, -0.25, -0.5],
+        "target": [0.04, 0.01, 0.0, -0.01, -0.03],
+    }, index=idx)
+    mom_raw = pd.DataFrame([[0.50, 0.20, 0.05, -0.10, -0.30]], index=dates, columns=tickers)
+    vol_raw = pd.DataFrame([[0.05, 0.10, 0.15, 0.20, 0.40]], index=dates, columns=tickers)
+    out = momentum_vol_benchmark(panel, mom_raw, vol_raw, quantile=0.2, fee=0.0)
+    assert out.loc[dates[0], "n_long"] == 1 and out.loc[dates[0], "n_short"] == 1
+    # long A (score brut 10, le plus fort), short E (score brut -0,75, le plus faible) : brut = rA - rE
+    assert out.loc[dates[0], "gross"] == pytest.approx(0.04 - (-0.03))
+
+
+def test_momentum_vol_benchmark_ignores_zero_vol_and_missing_panel_rows():
+    dates = pd.to_datetime(["2020-01-01"])
+    tickers = list("ABCDE")
+    idx = pd.MultiIndex.from_product([dates, tickers], names=["date", "ticker"])
+    panel = pd.DataFrame({
+        "mom_12_2": [0.1, 0.2, 0.3, 0.4, float("nan")],      # E absent du panel à cette date
+        "vol_12m": [0.1] * 5,
+        "target": [0.01, 0.02, 0.03, 0.04, 0.05],
+    }, index=idx)
+    mom_raw = pd.DataFrame([[0.5, 0.2, 0.1, -0.2, 0.9]], index=dates, columns=tickers)
+    vol_raw = pd.DataFrame([[0.0, 0.1, 0.1, 0.1, 0.1]], index=dates, columns=tickers)  # A : vol nulle
+    out = momentum_vol_benchmark(panel, mom_raw, vol_raw, quantile=0.2, fee=0.0)
+    # A (vol nulle) et E (hors panel) sont exclus du classement : long B (0,2/0,1), short D (-0,2/0,1)
+    assert out.loc[dates[0], "gross"] == pytest.approx(0.02 - 0.04)
+
+
 def test_costs_reduce_net_of_gross():
     idx = pd.date_range("2020-01-01", periods=6, freq="MS")
     rng = np.random.default_rng(3)
@@ -120,9 +155,31 @@ def test_sharpe_and_nw_tstat_signs():
 
 
 def test_deflated_sharpe_penalizes_trials():
-    high = mx.deflated_sharpe(1.0, n_trials=2, n_obs=192, skew=0.0, kurt=3.0)
-    low = mx.deflated_sharpe(1.0, n_trials=500, n_obs=192, skew=0.0, kurt=3.0)
+    high = mx.deflated_sharpe(1.0, n_trials=2, n_obs=192, skew=0.0, kurt=3.0,
+                              sr_variance_across_trials=0.01)
+    low = mx.deflated_sharpe(1.0, n_trials=500, n_obs=192, skew=0.0, kurt=3.0,
+                             sr_variance_across_trials=0.01)
     assert high > low
+
+
+def test_deflated_sharpe_penalizes_dispersion_across_trials():
+    tight = mx.deflated_sharpe(1.0, n_trials=33, n_obs=192, skew=0.0, kurt=3.0,
+                               sr_variance_across_trials=0.001)
+    wide = mx.deflated_sharpe(1.0, n_trials=33, n_obs=192, skew=0.0, kurt=3.0,
+                              sr_variance_across_trials=0.05)
+    assert tight > wide
+
+
+def test_deflated_sharpe_refuses_missing_trial_variance():
+    # l'ancien défaut silencieux sr²/n_obs annulait la déflation : la variance mesurée est obligatoire
+    with pytest.raises(TypeError):
+        mx.deflated_sharpe(1.0, n_trials=33, n_obs=192, skew=0.0, kurt=3.0)
+    with pytest.raises(ValueError):
+        mx.deflated_sharpe(1.0, n_trials=33, n_obs=192, skew=0.0, kurt=3.0,
+                           sr_variance_across_trials=float("nan"))
+    with pytest.raises(ValueError):
+        mx.deflated_sharpe(1.0, n_trials=33, n_obs=192, skew=0.0, kurt=3.0,
+                           sr_variance_across_trials=0.0)
 
 
 def test_pbo_unbiased_around_half_for_pure_noise():
@@ -137,3 +194,14 @@ def test_pbo_low_when_one_config_dominates():
     perf = pd.DataFrame(rng.normal(0, 0.1, size=(10, 8)))
     perf.iloc[3] += 2.0                              # une configuration réellement meilleure partout
     assert mx.pbo_cscv(perf) < 0.2
+
+
+def test_pbo_partitions_are_random_balanced_and_reproducible():
+    # une configuration meilleure UNIQUEMENT sur la première moitié des découpages : l'ancien tirage
+    # lexicographique (début toujours en échantillon) l'aurait déclarée suroptimisée presque partout ;
+    # un tirage équilibré au hasard doit la voir gagner IS et OOS dans une bonne part des partitions
+    perf = pd.DataFrame(np.zeros((6, 28)))
+    perf.iloc[2, :14] = 1.0
+    p = mx.pbo_cscv(perf, n_partitions=500, seed=123)
+    assert p < 0.9                                    # l'ancien biais donnait ~1,0 sur ce motif
+    assert p == mx.pbo_cscv(perf, n_partitions=500, seed=123)   # graine fixée : reproductible

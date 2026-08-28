@@ -26,8 +26,9 @@ from sklearn.base import clone
 
 from memoire2 import metrics as mx
 from memoire2 import portfolio as pf
+from memoire2.data import read_prices_daily
 from memoire2.models import grid, model_zoo
-from memoire2.panel import build_panel
+from memoire2.panel import build_panel, characteristics
 from memoire2.validation import cpcv_splits, walk_forward_splits
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -50,28 +51,32 @@ def _fit_predict(pipe, panel: pd.DataFrame, train_dates, test_dates) -> pd.Serie
     return pd.Series(model.predict(test[x_cols]), index=test.index)
 
 
-def select_hyperparameters(panel: pd.DataFrame, verbose: bool = True) -> tuple[dict, int]:
-    """Grilles évaluées sur 2004-2007 (entraînement 2000-2003) ; retourne les pipelines gelés et n_essais."""
+def select_hyperparameters(panel: pd.DataFrame, verbose: bool = True) -> tuple[dict, list[float]]:
+    """Grilles évaluées sur 2004-2007 (entraînement 2000-2003) ; retourne les pipelines gelés et la liste
+    des Sharpe nets annualisés de CHAQUE essai de la grille sur la fenêtre de validation (un par essai) :
+    c'est la matière première de la variance entre essais exigée par le Sharpe déflaté."""
     dates = _dates(panel)
     train_dates = pd.DatetimeIndex(sorted(set(dates[dates < TRAIN_END])))
     valid_dates = pd.DatetimeIndex(sorted(set(dates[(dates >= TRAIN_END) & (dates < VALID_END)])))
     zoo, grids = model_zoo(), grid()
-    frozen, n_trials = {}, 0
+    frozen, trial_sharpes = {}, []
     for name, pipe in zoo.items():
         if pipe is None:
             continue
         best_r2, best_params = -np.inf, {}
         for params in grids.get(name, [{}]):
-            n_trials += 1
             candidate = clone(pipe).set_params(**params)
             pred = _fit_predict(candidate, panel, train_dates, valid_dates)
             r2 = mx.r2_oos_gkx(panel.loc[pred.index, "target"].values, pred.values)
+            perf = pf.long_short_returns(pred.unstack("ticker"),
+                                         panel.loc[pred.index, "target"].unstack("ticker"), fee=FEE)
+            trial_sharpes.append(mx.sharpe_monthly(perf["net"]))
             if r2 > best_r2:
                 best_r2, best_params = r2, params
         frozen[name] = clone(pipe).set_params(**best_params)
         if verbose:
             print(f"  {name}: {best_params} (R2 validation {best_r2:.4f})")
-    return frozen, n_trials
+    return frozen, trial_sharpes
 
 
 def walk_forward_predictions(panel: pd.DataFrame, frozen: dict) -> pd.DataFrame:
@@ -117,7 +122,7 @@ def run_country(country: str, raw_dir: Path = RAW, results_dir: Path = RESULTS, 
     print(f"  {len(panel)} observations, {n_dates} dates, {panel.index.get_level_values('ticker').nunique()} titres")
 
     print(f"=== {country} : hyperparamètres sur validation 2004-2007 (gelés ensuite) ===")
-    frozen, n_trials = select_hyperparameters(panel)
+    frozen, valid_sharpes = select_hyperparameters(panel)
     if fast:
         frozen = {k: v for k, v in frozen.items() if k in ("ridge", "hist_gb")}
 
@@ -128,10 +133,19 @@ def run_country(country: str, raw_dir: Path = RAW, results_dir: Path = RESULTS, 
     joined.to_parquet(results_dir / f"predictions_{country}.parquet")
 
     realized = panel["target"].unstack("ticker")
+    perf_by_model = {name: pf.long_short_returns(preds[name].unstack("ticker"),
+                                                 realized.loc[preds.index.get_level_values("date").unique()],
+                                                 fee=FEE) for name in preds.columns}
+    # variance des Sharpe ENTRE les essais réellement menés : la grille de validation + les familles
+    # évaluées en test (Bailey et López de Prado, 2014 ; convertie en Sharpe par période, donc / racine
+    # de 12, l'unité du calcul du DSR)
+    trial_sharpes = valid_sharpes + [mx.sharpe_monthly(p["net"]) for p in perf_by_model.values()]
+    n_trials = len(trial_sharpes)
+    sr_var_monthly = float(np.nanvar(np.asarray(trial_sharpes, float) / np.sqrt(12), ddof=1))
+    print(f"  DSR : {n_trials} essais ({len(valid_sharpes)} réglages + {len(perf_by_model)} familles), "
+          f"variance mensuelle mesurée entre essais {sr_var_monthly:.5f}")
     perf_rows = []
-    for name in preds.columns:
-        wide = preds[name].unstack("ticker")
-        perf = pf.long_short_returns(wide, realized.loc[wide.index], fee=FEE)
+    for name, perf in perf_by_model.items():
         r2 = mx.r2_oos_gkx(joined["target"].values, joined[name].values) if name != "ensemble" else np.nan
         net = perf["net"]
         perf_rows.append({
@@ -139,11 +153,15 @@ def run_country(country: str, raw_dir: Path = RAW, results_dir: Path = RESULTS, 
             "cagr_net": mx.cagr_monthly(net), "sharpe_net": mx.sharpe_monthly(net),
             "sharpe_brut": mx.sharpe_monthly(perf["gross"]), "max_drawdown": mx.max_drawdown(net),
             "turnover_mensuel": float(perf["turnover"].mean()), "t_newey_west": mx.newey_west_tstat(net),
-            "dsr": mx.deflated_sharpe(mx.sharpe_monthly(net), n_trials=n_trials + len(preds.columns),
-                                      n_obs=len(net), skew=float(net.skew()), kurt=float(net.kurt() + 3)),
+            "dsr": mx.deflated_sharpe(mx.sharpe_monthly(net), n_trials=n_trials,
+                                      n_obs=len(net), skew=float(net.skew()), kurt=float(net.kurt() + 3),
+                                      sr_variance_across_trials=sr_var_monthly),
         })
-    # les deux repères sans apprentissage
-    naive = pf.momentum_vol_benchmark(panel.loc[_dates(panel) >= VALID_END], fee=FEE)
+    # les deux repères sans apprentissage ; le contrôle se classe sur les valeurs BRUTES recalculées
+    # depuis les prix (les colonnes du panel sont des rangs, voir portfolio.momentum_vol_benchmark)
+    raw_chars = characteristics(read_prices_daily(country, raw_dir))
+    naive = pf.momentum_vol_benchmark(panel.loc[_dates(panel) >= VALID_END],
+                                      raw_chars["mom_12_2"], raw_chars["vol_12m"], fee=FEE)
     perf_rows.append({"model": "controle_momentum_vol (Nagel)", "cagr_net": mx.cagr_monthly(naive["net"]),
                       "sharpe_net": mx.sharpe_monthly(naive["net"]), "max_drawdown": mx.max_drawdown(naive["net"]),
                       "turnover_mensuel": float(naive["turnover"].mean()),
