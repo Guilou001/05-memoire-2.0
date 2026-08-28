@@ -31,7 +31,7 @@ dev = ["pytest>=8", "ruff>=0.6"]
 m2 = "memoire2.cli:app"
 
 [project.urls]
-Repository = "https://github.com/Guilou001/memoire-2.0"
+Repository = "https://github.com/Guilou001/05-memoire-2.0"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/memoire2"]

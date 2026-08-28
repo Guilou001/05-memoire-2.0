@@ -2,10 +2,10 @@
 
 Reprise de mon mémoire de maîtrise (*Évaluation empirique d'actifs canadiens par l'apprentissage
 automatique*, UQAM, décembre 2024) avec les méthodes de 2026 : chaque biais mesuré dans la
-[version 1](https://github.com/Guilou001/memoire-uqam-2024) est corrigé ici, un par un, et chaque résultat
+[version 1](https://github.com/Guilou001/04-memoire-uqam-2024) est corrigé ici, un par un, et chaque résultat
 porte maintenant sa probabilité de n'être que du bruit.
 
-[![ci](https://github.com/Guilou001/memoire-2.0/actions/workflows/ci.yml/badge.svg)](https://github.com/Guilou001/memoire-2.0/actions/workflows/ci.yml)
+[![ci](https://github.com/Guilou001/05-memoire-2.0/actions/workflows/ci.yml/badge.svg)](https://github.com/Guilou001/05-memoire-2.0/actions/workflows/ci.yml)
 ![python](https://img.shields.io/badge/python-3.12-blue)
 ![licence](https://img.shields.io/badge/code-MIT-green)
 
@@ -28,7 +28,7 @@ the probability of backtest overfitting. Full-protocol result: net of 10 bp cost
 ## 1. Pourquoi une version 2
 
 La version 1 reproduit le mémoire à l'identique et documente quatre problèmes, chacun mesuré dans
-[son dépôt](https://github.com/Guilou001/memoire-uqam-2024) : les hyperparamètres étaient choisis sur la
+[son dépôt](https://github.com/Guilou001/04-memoire-uqam-2024) : les hyperparamètres étaient choisis sur la
 période de test ; les variables macroéconomiques étaient alignées un mois en avance sur le rendement à
 prédire ; plusieurs modèles prédisaient la même valeur pour tous les titres (leurs portefeuilles se
 réduisaient à l'ordre alphabétique des colonnes) ; et les coûts de transaction étaient à zéro. Or un
@@ -223,4 +223,4 @@ Pelger (2025, RFS). Données : Yahoo Finance (usage personnel), LCDMA (Fortin-Ga
 Surprenant, 2022), FRED-MD (McCracken et Ng, 2016).
 
 Code MIT ; texte et figures CC BY 4.0. Guillaume Vaudescal, avec le dépôt frère
-[memoire-uqam-2024](https://github.com/Guilou001/memoire-uqam-2024) pour la version reproduite du mémoire.
+[memoire-uqam-2024](https://github.com/Guilou001/04-memoire-uqam-2024) pour la version reproduite du mémoire.
