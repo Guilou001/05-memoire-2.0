@@ -1,5 +1,6 @@
 {
- "pbo": 0.008,
+ "pbo": 0.086,
  "n_configs": 7,
- "n_chemins": 28
+ "n_blocs_disjoints": 8,
+ "niveau_nul_h0": 0.42857142857142855
 }

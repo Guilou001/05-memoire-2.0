@@ -3,8 +3,15 @@
 Pourquoi purger : la cible de la date de formation t est le rendement du mois [t, t+1]. Une observation
 d'entraînement à t-1 a une cible qui chevauche [t-1, t] : elle ne recouvre pas le mois de test [t, t+1],
 mais les caractéristiques (momentum, volatilité) se recouvrent sur 12 mois. On retire donc de
-l'entraînement un « embargo » de mois de part et d'autre de chaque bloc de test, ce qui coupe tout
-chevauchement d'information entre entraînement et test (López de Prado, 2018).
+l'entraînement un « embargo » de mois de part et d'autre de chaque bloc de test (López de Prado, 2018).
+
+Ce que l'embargo coupe, exactement. Avec le défaut d'un mois, employé partout en production, il coupe
+le chevauchement des CIBLES et lui seul. Le chevauchement des CARACTÉRISTIQUES subsiste : une date
+d'entraînement à deux mois d'un mois de test partage encore dix mois d'historique de prix sur douze
+dans ``mom_12_2`` et dans ``vol_12m``. Le couper exigerait un embargo de douze mois, la longueur de la
+caractéristique la plus longue, ce qui amputerait chaque entraînement de deux ans autour de chaque bloc
+de test. Le protocole ne dit donc pas « aucun chevauchement d'information », il dit « aucune fuite de
+cible, chevauchement de caractéristiques déclaré » : les chemins CPCV restent dépendants entre eux.
 
 La CPCV découpe l'axe du temps en ``n_groups`` blocs contigus et prend toutes les combinaisons de
 ``k_test`` blocs comme test : chaque configuration est ainsi jugée sur de nombreux chemins hors

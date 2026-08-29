@@ -170,6 +170,18 @@ def test_deflated_sharpe_penalizes_dispersion_across_trials():
     assert tight > wide
 
 
+def test_expected_max_sharpe_is_the_barrier_of_the_deflated_sharpe():
+    # le seuil SR0 ne dépend pas du Sharpe observé, il monte avec le nombre d'essais et avec leur
+    # dispersion, et un Sharpe pile au seuil laisse une probabilité de 0,5 (l'argument est nul)
+    sr0 = mx.expected_max_sharpe(33, 0.01561)
+    assert sr0 == pytest.approx(mx.expected_max_sharpe(33, 0.01561))
+    assert mx.expected_max_sharpe(500, 0.01561) > sr0 > mx.expected_max_sharpe(2, 0.01561)
+    assert mx.expected_max_sharpe(33, 0.05) > sr0
+    au_seuil = mx.deflated_sharpe(sr0 * np.sqrt(12), n_trials=33, n_obs=192, skew=0.0, kurt=3.0,
+                                  sr_variance_across_trials=0.01561)
+    assert au_seuil == pytest.approx(0.5, abs=1e-9)
+
+
 def test_deflated_sharpe_refuses_missing_trial_variance():
     # l'ancien défaut silencieux sr²/n_obs annulait la déflation : la variance mesurée est obligatoire
     with pytest.raises(TypeError):
@@ -180,6 +192,50 @@ def test_deflated_sharpe_refuses_missing_trial_variance():
     with pytest.raises(ValueError):
         mx.deflated_sharpe(1.0, n_trials=33, n_obs=192, skew=0.0, kurt=3.0,
                            sr_variance_across_trials=0.0)
+
+
+def test_expected_max_sharpe_un_seul_essai_ne_deflate_rien():
+    # ppf(1 - 1/1) valait -inf : le seuil partait à -inf et le Sharpe déflaté rendait 1,0 pour
+    # n'importe quel Sharpe observé, même franchement négatif
+    assert mx.expected_max_sharpe(1, 0.01) == 0.0
+    assert mx.deflated_sharpe(-2.0, n_trials=1, n_obs=100, skew=0.0, kurt=3.0,
+                              sr_variance_across_trials=0.01) < 0.01
+    with pytest.raises(ValueError):
+        mx.expected_max_sharpe(0, 0.01)
+
+
+def test_variance_essais_a_l_horizon_retire_le_bruit_d_estimation():
+    # une dispersion observée entièrement imputable au bruit d'un horizon court (var <= 1/T) doit se
+    # ramener au seul bruit de l'horizon cible : plus rien de « vrai » ne subsiste
+    assert mx.variance_essais_a_l_horizon(1 / 48, 48, 196) == pytest.approx(1 / 196)
+    assert mx.variance_essais_a_l_horizon(0.005, 48, 196) == pytest.approx(1 / 196)
+    # une dispersion vraie survit et s'ajoute au bruit de l'horizon cible
+    assert mx.variance_essais_a_l_horizon(1 / 48 + 0.01, 48, 196) == pytest.approx(0.01 + 1 / 196)
+    # le seuil qui en découle est plus BAS que celui calculé sur les essais courts : c'est le sens
+    # du biais que la correction annule
+    assert mx.expected_max_sharpe(33, mx.variance_essais_a_l_horizon(0.01561, 48, 196)) \
+        < mx.expected_max_sharpe(33, 0.01561)
+
+
+def test_niveau_nul_pbo_depend_de_la_parite_du_nombre_de_configurations():
+    assert mx.niveau_nul_pbo(8) == pytest.approx(0.5)
+    assert mx.niveau_nul_pbo(7) == pytest.approx(3 / 7)
+
+
+def test_pbo_colonnes_chevauchantes_ecrase_la_mesure():
+    # reproduit le défaut trouvé à l'audit du 2026-08-29 : alimenter la CSCV avec des chemins qui
+    # partagent leurs blocs met les mêmes mois des deux côtés de chaque partition, et la PBO
+    # s'effondre alors que rien ne distingue les configurations
+    from itertools import combinations
+
+    disjoints, chevauchants = [], []
+    for s in range(20):
+        blocs = pd.DataFrame(np.random.default_rng(s).normal(size=(7, 8)))
+        chemins = pd.DataFrame({i: blocs[list(c)].mean(axis=1)
+                                for i, c in enumerate(combinations(range(8), 2))})
+        disjoints.append(mx.pbo_cscv(blocs))
+        chevauchants.append(mx.pbo_cscv(chemins))
+    assert float(np.mean(chevauchants)) < float(np.mean(disjoints)) - 0.2
 
 
 def test_pbo_unbiased_around_half_for_pure_noise():

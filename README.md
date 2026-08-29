@@ -13,7 +13,8 @@ porte maintenant sa probabilité de n'être que du bruit.
 moment de décider, les hyperparamètres choisis hors de la période de test et les coûts payés, **aucun des
 huit modèles ne bat le portefeuille équipondéré, ni au Canada ni aux États-Unis**. Le meilleur modèle fait
 4,1 % net par an avec un ratio de Sharpe, le rendement moyen divisé par la volatilité (annualisé), de 0,31
-et un Sharpe déflaté de 0,01 ; l'équipondéré canadien fait 11,4 % avec un Sharpe de 0,85. La rotation, la
+et un Sharpe déflaté de 0,007 (0,195 en remettant les essais au même horizon, modélisé) ; l'équipondéré
+canadien fait 11,4 % avec un Sharpe de 0,85. La rotation, la
 somme mensuelle des variations absolues des poids du portefeuille, atteint 2 à 3 par mois et coûte plus
 que le signal extrait, exactement le mécanisme décrit par Jensen, Kelly, Malamud et Pedersen (2026).
 
@@ -42,7 +43,7 @@ question, les données et les familles de modèles du mémoire.
 |---|---|---|
 | Macro un mois dans le futur | La macro attachée à une date de formation est la dernière ligne **publiée** avant cette date (décalage de 2 mois, convention FRED-MD vérifiée) | `panel.py`, paramètre `macro_lag` |
 | Hyperparamètres choisis sur le test | Grilles évaluées sur 2004-2007 (entraînement 2000-2003), puis **gelées** ; 2008-2024 ne sert qu'à mesurer | `runner.py`, `select_hyperparameters` |
-| Un seul chemin de backtest | Validation croisée purgée combinatoire : 28 chemins hors échantillon avec purge, le retrait des mois d'entraînement dont l'information chevauche un bloc de test, et embargo, une marge d'un mois retirée en plus de part et d'autre de chaque bloc, d'où une **distribution** de Sharpe par modèle et la probabilité de suroptimisation (PBO, estimée sur 500 partitions équilibrées tirées au hasard, graine fixée) | `validation.py`, `metrics.pbo_cscv` |
+| Un seul chemin de backtest | Validation croisée purgée combinatoire : 28 chemins hors échantillon avec purge, le retrait des mois d'entraînement dont l'information chevauche un bloc de test, et embargo, une marge d'un mois retirée en plus de part et d'autre de chaque bloc, d'où une **distribution** de Sharpe par modèle. Les 28 chemins sont ensuite agrégés en 8 blocs DISJOINTS avant la probabilité de suroptimisation (PBO, 500 partitions équilibrées tirées au hasard, graine fixée) : donner à la CSCV des colonnes qui se chevauchent met les mêmes mois des deux côtés de chaque partition et effondre la mesure | `validation.py`, `metrics.pbo_cscv` |
 | Coûts à zéro | 10 points de base par unité échangée, rotation mesurée, tout se lit **net** | `portfolio.py` |
 | Sharpe brut sans correction | Sharpe déflaté (Bailey et López de Prado, 2014) : la probabilité que le Sharpe survive au nombre d'essais tentés, calculée avec la variance des Sharpe mesurée entre ces essais ; t-stat de Newey-West, la statistique de test dont l'erreur type corrige l'autocorrélation et l'hétéroscédasticité des rendements mensuels | `metrics.py` |
 | Macro seule comme prédicteur | Sept caractéristiques par titre (momentum 1, 3, 6 et 12-2 mois, volatilités, rendement quotidien maximal), normalisées en rangs par date, **interagies** avec des facteurs macro appris par ACP, l'analyse en composantes principales, qui résume les dizaines de séries macro en quelques facteurs, à l'intérieur de chaque pli | `panel.py`, `models.py` |
@@ -69,7 +70,8 @@ standardisées). Tout est scikit-learn : pas de dépendance fragile.
 4. **Payer les coûts, compter les positions.** Chaque mois, achat du quintile du haut, vente à découvert du
    quintile du bas (10 titres de chaque côté), poids égaux, 10 pb par unité échangée.
 5. **Ne croire un Sharpe que déflaté.** Chaque Sharpe net est accompagné de sa t-stat Newey-West et de son
-   Sharpe déflaté ; la grille entière passe à la PBO.
+   Sharpe déflaté ; la grille entière passe à la PBO, lue contre son repère sous H0 (0,43 pour sept
+   configurations, `metrics.niveau_nul_pbo`) et non contre 0,50.
 
 ## 4. Les résultats complets (mesurés, walk-forward 2008-2024, nets de 10 pb)
 
@@ -127,7 +129,7 @@ au-dessus d'un dollar, mais loin sous la courbe tiretée de l'équipondéré ; l
 Comment lire ces résultats, en cinq constats :
 
 - **Aucun modèle ne bat l'équipondéré, dans aucun des deux pays.** Le meilleur cas est le gradient
-  boosting canadien : 4,1 % net par an (Sharpe 0,31, t de Newey-West 1,33, DSR 0,01), contre 11,4 %
+  boosting canadien : 4,1 % net par an (Sharpe 0,31, t de Newey-West 1,33, DSR 0,007), contre 11,4 %
   (Sharpe 0,85) pour le simple équipondéré. Aucun DSR n'atteint 0,95 : aucun Sharpe ne survit à la
   correction du nombre d'essais, une fois la variance entre essais mesurée sur les 33 essais réellement
   menés plutôt que supposée.
@@ -138,8 +140,11 @@ Comment lire ces résultats, en cinq constats :
   d'échec décrite par Jensen, Kelly, Malamud et Pedersen (2026) et le soupçon de Nagel (2025).
 - **La ligne plate du filet élastique américain n'est pas une victoire.** Sa pénalité L1 annule presque
   tous les coefficients, ses prédictions deviennent égales entre titres, et le garde-fou anti-classement-
-  alphabétique le sort alors du marché : son Sharpe de 0,27 est surtout celui de ne rien faire. La v1 aurait
-  affiché ce modèle comme gagnant ; la v2 montre qu'il est vide.
+  alphabétique le sort alors du marché : son Sharpe de 0,27 est surtout celui de ne rien faire. Le compte
+  est publié depuis l'audit du 2026-08-29 dans la colonne `mois_actifs` : **12 mois sur 195**, tous en
+  2008, dernier rendement non nul en janvier 2009. Un Sharpe qui divise la moyenne de douze mois d'activité
+  par l'écart type de seize ans mesure surtout la longueur de l'inaction ; la figure du Sharpe déflaté le
+  porte à côté du nom du modèle. La v1 aurait affiché ce modèle comme gagnant ; la v2 montre qu'il est vide.
 - **Le Canada ressort mieux que les États-Unis** (les arbres y sont tous positifs nets, R² HÉ légèrement
   positifs), ce qui rejoint l'intuition du mémoire : un marché plus petit, moins arbitré, laisse un peu plus
   de prévisibilité : les arbres canadiens battent au moins le contrôle momentum/volatilité (Sharpe −0,16),
@@ -148,9 +153,14 @@ Comment lire ces résultats, en cinq constats :
   entièrement à droite de zéro ; celle des Extra Trees canadiens et celle du gradient boosting américain
   sont franchement à gauche, et trois autres (RFF canadien, MLP et RFF américains) finissent au ras de
   zéro (figures ci-dessous). La PBO ressort à
-  0,11 au Canada et 0,01 aux États-Unis (`results/tables/pbo_canada.json`, `pbo_usa.json`) : le
-  classement interne des modèles est plutôt stable d'un découpage à l'autre, ce qui ne dit rien de leur
-  niveau, faible partout.
+  0,35 au Canada et 0,09 aux États-Unis, contre un repère de 0,43 sous H0 pour sept configurations
+  (`results/tables/pbo_canada.json`, `pbo_usa.json`) : le classement interne des modèles est plutôt
+  stable d'un découpage à l'autre, ce qui ne dit rien de leur niveau, faible partout. Ces deux
+  nombres remplacent le 0,11 et le 0,01 publiés jusqu'à l'audit du 2026-08-29, obtenus en donnant à
+  la CSCV les 28 chemins CPCV, qui se chevauchent : avec deux blocs de test sur huit, chaque bloc
+  est jugé dans sept chemins, si bien que les deux moitiés d'une partition portaient sur les mêmes
+  mois et que la PBO s'effondrait. La matrice porte désormais un Sharpe par bloc DISJOINT ; l'écart
+  est reproduit sur du bruit pur par `test_pbo_colonnes_chevauchantes_ecrase_la_mesure`.
 - **Le petit R² positif des arbres n'est pas du talent de classement.** Un test placebo le montre : en
   mélangeant aléatoirement les cibles (plus aucun lien entre variables et rendements), les Extra Trees
   canadiens gardent un R² hors échantillon de +0,013, comparable au +0,014 obtenu sur les vraies
@@ -161,12 +171,26 @@ Comment lire ces résultats, en cinq constats :
 
 ![Sharpe déflaté par modèle](results/figures/dsr_par_modele.png)
 
-Comment lire cette figure : chaque paire de barres est le Sharpe déflaté d'un modèle (Canada, puis
-États-Unis), c'est-à-dire la probabilité que son Sharpe net dépasse le meilleur Sharpe attendu de la
-seule chance après les 33 essais menés ; la ligne tiretée marque le seuil de 0,95 au-dessus duquel un
-Sharpe serait crédible. Aucune barre ne s'en approche : les Sharpe positifs du tableau canadien sont
-indiscernables du bruit une fois comptés les essais et leur dispersion. Chiffres : colonne `dsr` de
-`results/tables/walk_forward_canada.csv` et `walk_forward_usa.csv`.
+Comment lire cette figure : un trait horizontal par modèle donne son ratio de Sharpe annualisé net
+sur 2008-2024, et le trait tireté orange marque le seuil SR0, le meilleur Sharpe qu'on attend de la
+seule chance après les 33 essais menés (Bailey et López de Prado, 2014). La bande grise de droite
+porte deux probabilités, pas des Sharpe, d'où son fond distinct et l'arrêt des graduations avant
+elle : le Sharpe déflaté mesuré, et sa variante à horizon égal. Le meilleur modèle canadien plafonne
+à 0,31 de Sharpe contre un seuil de 0,91, et le meilleur américain à 0,27 contre 0,92 : c'est cet
+écart, et non un défaut de calcul, qui laisse le Sharpe déflaté à 0,007 au mieux.
+
+Le seuil pointillé gris est la même barre calculée après avoir remis les essais au même horizon que
+le Sharpe jugé. Les 25 réglages de la grille sont mesurés sur 48 mois de validation, les 8 familles
+sur 196 mois de test ; comme la variance d'échantillonnage d'un Sharpe décroît en 1/T, les essais
+courts gonflent la dispersion, donc le seuil, donc écrasent le Sharpe déflaté, et le biais joue en
+faveur du verdict de ce dépôt. La correction (statut modélisé, `metrics.variance_essais_a_l_horizon`)
+ramène le seuil de 0,91 à 0,52 et le meilleur Sharpe déflaté de 0,007 à 0,195. Le verdict tient dans
+les deux lectures : 0,195 reste très loin de 0,95.
+
+La version précédente de cette figure portait le Sharpe déflaté lui-même sur un axe de 0 à 1. Comme
+toutes les valeurs valaient au plus 0,007, les seize barres étaient invisibles et l'étiquette « 0,00 »
+se répétait seize fois : la figure était vraie et ne montrait rien. Chiffres : colonnes `sharpe_net`,
+`dsr` et `sharpe_seuil_dsr` de `results/tables/walk_forward_canada.csv` et `walk_forward_usa.csv`.
 
 ![Sharpe CPCV, Canada](results/figures/cpcv_canada.png)
 
@@ -212,6 +236,9 @@ Les chiffres des tableaux ci-dessus viennent de `results/tables/walk_forward_can
 | Pas de taille ni de fondamentaux par titre (prix seulement) | reconnu ; l'imputation propre de fondamentaux (Bryzgalova et al., 2025) est l'extension naturelle |
 | Millésime macro final (révisions non simulées) ; le décalage de publication, lui, est corrigé | reconnu ; millésimes ALFRED en extension |
 | Coûts fixes à 10 pb, sans impact de marché | modélisé ; paramètre `fee` |
+| Bloc macro américain en NIVEAUX non transformés : le `Fred-MD.csv` déposé n'a pas la ligne `tcode` que McCracken et Ng (2016) publient pour rendre chaque série stationnaire, et rien ne l'applique. Le bloc canadien (LCDMA) est transformé en amont : les deux pays ne reçoivent donc pas le même traitement, et l'écart Canada / États-Unis peut venir de là | mesuré ; 32 des 112 colonnes américaines ont une corrélation au temps supérieure à 0,9 en valeur absolue, contre 0 des 405 colonnes canadiennes. Correctif : redéposer le millésime officiel avec sa ligne `tcode` |
+| Embargo d'un mois : il coupe le chevauchement des CIBLES, pas celui des CARACTÉRISTIQUES | déclaré ; deux dates séparées de deux mois partagent encore dix mois d'historique de prix sur douze dans `mom_12_2` et `vol_12m`. Le couper exigerait un embargo de douze mois ; les chemins CPCV restent donc dépendants entre eux |
+| Variance entre essais mesurée sur des horizons inégaux (48 mois de validation pour la grille, 196 mois de test pour les familles) | mesuré et corrigé en parallèle ; la colonne `dsr_horizon_egal` remet la dispersion à l'horizon jugé (statut modélisé) : le seuil passe de 0,91 à 0,52 et le meilleur Sharpe déflaté de 0,007 à 0,195, sans changer le verdict |
 | Fréquence mensuelle, dérive intra-mois simplifiée | choix assumé, testé sans effet sur les conclusions en v1 |
 
 ## 7. Références

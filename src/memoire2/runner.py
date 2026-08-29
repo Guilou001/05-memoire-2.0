@@ -29,7 +29,7 @@ from memoire2 import portfolio as pf
 from memoire2.data import read_prices_daily
 from memoire2.models import grid, model_zoo
 from memoire2.panel import build_panel, characteristics
-from memoire2.validation import cpcv_splits, walk_forward_splits
+from memoire2.validation import contiguous_groups, cpcv_splits, walk_forward_splits
 
 ROOT = Path(__file__).resolve().parents[2]
 RAW = ROOT / "data" / "raw"
@@ -97,21 +97,38 @@ def walk_forward_predictions(panel: pd.DataFrame, frozen: dict) -> pd.DataFrame:
 
 def cpcv_performance(panel: pd.DataFrame, frozen: dict, n_groups: int = 8, k_test: int = 2,
                      embargo_months: int = 1) -> pd.DataFrame:
-    """Sharpe net par (configuration, chemin CPCV) sur 2008-2024 : la matrice de la PBO."""
+    """Sharpe net par (configuration, BLOC de test disjoint) sur 2008-2024 : la matrice de la PBO.
+
+    Les 28 chemins CPCV se chevauchent : avec deux blocs de test sur huit, chaque bloc est jugé
+    dans sept chemins. Découper ces 28 colonnes en deux moitiés, ce que fait la CSCV, met alors les
+    mêmes mois des deux côtés de la partition et effondre la PBO. La matrice rendue porte donc un
+    Sharpe par BLOC, moyenné sur les chemins où ce bloc est en test, ce qui rend les colonnes
+    disjointes dans le temps comme l'exige Bailey et al. (2017).
+
+    Approximation déclarée : le Sharpe d'un bloc est calculé sur les mois de ce bloc à l'intérieur
+    d'un chemin dont le test compte deux blocs non contigus ; le premier mois du second bloc porte
+    donc un coût de rotation de mise en place hérité du bloc précédent.
+    """
     dates = _dates(panel)
     eval_panel = panel.loc[dates >= VALID_END]
-    splits = cpcv_splits(pd.DatetimeIndex(sorted(set(_dates(eval_panel)))), n_groups, k_test, embargo_months)
+    eval_dates = pd.DatetimeIndex(sorted(set(_dates(eval_panel))))
+    blocs = contiguous_groups(eval_dates, n_groups)
+    splits = cpcv_splits(eval_dates, n_groups, k_test, embargo_months)
     rows = {}
     for name, pipe in frozen.items():
-        sharpes = []
+        par_bloc: dict[int, list[float]] = {g: [] for g in range(n_groups)}
         for tr, te in splits:
             pred = _fit_predict(pipe, eval_panel, tr, te)
             wide_p = pred.unstack("ticker")
             wide_r = eval_panel.loc[pred.index, "target"].unstack("ticker")
-            perf = pf.long_short_returns(wide_p, wide_r, fee=FEE)
-            sharpes.append(mx.sharpe_monthly(perf["net"]))
+            net = pf.long_short_returns(wide_p, wide_r, fee=FEE)["net"]
+            for g in sorted(set(blocs.loc[net.index])):
+                par_bloc[int(g)].append(mx.sharpe_monthly(net[blocs.loc[net.index] == g]))
+        sharpes = [float(np.nanmean(par_bloc[g])) if par_bloc[g] else float("nan")
+                   for g in range(n_groups)]
         rows[name] = sharpes
-        print(f"  {name}: CPCV {len(splits)} chemins, Sharpe médian {np.nanmedian(sharpes):.2f}")
+        print(f"  {name}: CPCV {len(splits)} chemins agrégés en {n_groups} blocs disjoints, "
+              f"Sharpe médian {np.nanmedian(sharpes):.2f}")
     return pd.DataFrame(rows).T
 
 
@@ -142,8 +159,22 @@ def run_country(country: str, raw_dir: Path = RAW, results_dir: Path = RESULTS, 
     trial_sharpes = valid_sharpes + [mx.sharpe_monthly(p["net"]) for p in perf_by_model.values()]
     n_trials = len(trial_sharpes)
     sr_var_monthly = float(np.nanvar(np.asarray(trial_sharpes, float) / np.sqrt(12), ddof=1))
-    print(f"  DSR : {n_trials} essais ({len(valid_sharpes)} réglages + {len(perf_by_model)} familles), "
-          f"variance mensuelle mesurée entre essais {sr_var_monthly:.5f}")
+    # la barre à franchir, annualisée comme les Sharpe observés : elle est la même pour tous les
+    # modèles d'un pays, et c'est elle qui rend le DSR lisible (un DSR nul dit seulement « en dessous »,
+    # le seuil dit de combien)
+    sharpe_seuil = mx.expected_max_sharpe(n_trials, sr_var_monthly) * np.sqrt(12)
+    # les essais ne partagent pas le même horizon : les réglages de la grille sont jugés sur les mois
+    # de validation, les familles sur ceux du test. La variance d'un Sharpe estimé décroît en 1/T,
+    # donc les essais courts gonflent la dispersion et écrasent le DSR, dans le sens du verdict.
+    # On publie les deux : la mesure brute et la variante remise au même horizon (MODÉLISÉE).
+    n_valid = len(set(_dates(panel)[(_dates(panel) >= TRAIN_END) & (_dates(panel) < VALID_END)]))
+    n_test = len(next(iter(perf_by_model.values()))["net"])
+    sr_var_horizon = mx.variance_essais_a_l_horizon(sr_var_monthly, n_valid, n_test)
+    seuil_horizon = mx.expected_max_sharpe(n_trials, sr_var_horizon) * np.sqrt(12)
+    print(f"  DSR : {n_trials} essais ({len(valid_sharpes)} réglages sur {n_valid} mois de validation "
+          f"+ {len(perf_by_model)} familles sur {n_test} mois de test), variance mensuelle mesurée "
+          f"entre essais {sr_var_monthly:.5f}, seuil de Sharpe annualisé {sharpe_seuil:.3f} ; "
+          f"à horizon égal (modélisé) variance {sr_var_horizon:.5f}, seuil {seuil_horizon:.3f}")
     perf_rows = []
     for name, perf in perf_by_model.items():
         r2 = mx.r2_oos_gkx(joined["target"].values, joined[name].values) if name != "ensemble" else np.nan
@@ -156,6 +187,16 @@ def run_country(country: str, raw_dir: Path = RAW, results_dir: Path = RESULTS, 
             "dsr": mx.deflated_sharpe(mx.sharpe_monthly(net), n_trials=n_trials,
                                       n_obs=len(net), skew=float(net.skew()), kurt=float(net.kurt() + 3),
                                       sr_variance_across_trials=sr_var_monthly),
+            "sharpe_seuil_dsr": sharpe_seuil, "n_essais_dsr": n_trials,
+            # variante à horizon égal, statut MODÉLISÉ (voir metrics.variance_essais_a_l_horizon)
+            "dsr_horizon_egal": mx.deflated_sharpe(mx.sharpe_monthly(net), n_trials=n_trials,
+                                                   n_obs=len(net), skew=float(net.skew()),
+                                                   kurt=float(net.kurt() + 3),
+                                                   sr_variance_across_trials=sr_var_horizon),
+            "sharpe_seuil_horizon_egal": seuil_horizon,
+            # un Sharpe calculé sur seize ans dont douze mois seulement portent une position mesure
+            # surtout la durée de l'inaction : le compte des mois actifs est publié à côté
+            "mois_actifs": int((perf["n_long"] > 0).sum()), "mois_total": len(net),
         })
     # les deux repères sans apprentissage ; le contrôle se classe sur les valeurs BRUTES recalculées
     # depuis les prix (les colonnes du panel sont des rangs, voir portfolio.momentum_vol_benchmark)
@@ -180,7 +221,10 @@ def run_country(country: str, raw_dir: Path = RAW, results_dir: Path = RESULTS, 
         matrix = cpcv_performance(panel, frozen)
         matrix.to_csv(results_dir / "tables" / f"cpcv_sharpe_{country}.csv")
         pbo = mx.pbo_cscv(matrix)
+        nul = mx.niveau_nul_pbo(len(matrix))
         (results_dir / "tables" / f"pbo_{country}.json").write_text(
-            json.dumps({"pbo": pbo, "n_configs": len(matrix), "n_chemins": matrix.shape[1]}, indent=1))
-        print(f"  PBO ({len(matrix)} configurations x {matrix.shape[1]} chemins) : {pbo:.2f}")
+            json.dumps({"pbo": pbo, "n_configs": len(matrix), "n_blocs_disjoints": matrix.shape[1],
+                        "niveau_nul_h0": nul}, indent=1))
+        print(f"  PBO ({len(matrix)} configurations x {matrix.shape[1]} blocs disjoints) : "
+              f"{pbo:.2f} ; repère sous H0 : {nul:.2f}")
     return table
