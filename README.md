@@ -9,6 +9,8 @@ porte maintenant sa probabilité de n'être que du bruit.
 ![python](https://img.shields.io/badge/python-3.12-blue)
 ![licence](https://img.shields.io/badge/code-MIT-green)
 
+Le même contenu en PDF : [rapport/rapport.pdf](rapport/rapport.pdf).
+
 **Résultat en une phrase (mesuré, protocole complet).** Une fois l'information réellement disponible au
 moment de décider, les hyperparamètres choisis hors de la période de test et les coûts payés, **aucun des
 huit modèles ne bat le portefeuille équipondéré, ni au Canada ni aux États-Unis**. Le meilleur modèle fait
