@@ -9,12 +9,14 @@ import pandas as pd
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
+from gvf.style import OKABE_ITO, appliquer, formateur  # noqa: F401
 
 from memoire2 import metrics as mx  # noqa: E402
 from memoire2 import portfolio as pf  # noqa: E402
 from memoire2.runner import FEE, RESULTS  # noqa: E402
 
-OKABE_ITO = ["#0072B2", "#D55E00", "#009E73", "#CC79A7", "#E69F00", "#56B4E9", "#F0E442", "#000000", "#999999"]
+# La palette et les réglages viennent de la couche partagée du portefeuille : les mêmes
+# couleurs et la même virgule décimale dans tous les dépôts, corrigées à un seul endroit.
 LABELS = {"canada": "Canada (50 titres TSX)", "usa": "États-Unis (50 titres S&P 500)"}
 NOMS_FR = {
     "ridge": "ridge", "elastic_net": "filet élastique", "random_forest": "forêt aléatoire",
@@ -23,12 +25,16 @@ NOMS_FR = {
 }
 
 
-def _style() -> None:
-    plt.rcParams.update({
-        "figure.figsize": (8.0, 4.5), "font.size": 9, "axes.spines.top": False, "axes.spines.right": False,
-        "legend.frameon": False, "pdf.fonttype": 42, "savefig.bbox": "tight",
-        "axes.prop_cycle": matplotlib.cycler(color=OKABE_ITO), "figure.constrained_layout.use": True,
-    })
+def _style():
+    """Les réglages communs du portefeuille, plus la taille de figure propre à ce dépôt.
+
+    Les figures de ce mémoire sont plus larges que hautes parce qu'elles portent toutes une série
+    de temps ou une comparaison de modèles côte à côte. C'est le seul réglage qui reste local.
+    """
+    appliquer()
+    plt.rcParams["figure.figsize"] = (8.0, 4.5)
+    plt.rcParams["font.size"] = 9
+    return formateur()
 
 
 def figures_for_country(country: str, results_dir: Path = RESULTS) -> list[Path]:
