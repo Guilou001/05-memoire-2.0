@@ -1,9 +1,12 @@
-# Mémoire 2.0 : la même question, sans les biais
+# Reprendre la question du mémoire avec un protocole sans fuite d'information
 
-Reprise de mon mémoire de maîtrise (*Évaluation empirique d'actifs canadiens par l'apprentissage
-automatique*, UQAM, décembre 2024) avec les méthodes de 2026 : chaque biais mesuré dans la
-[version 1](https://github.com/Guilou001/04-memoire-uqam-2024) est corrigé ici, un par un, et chaque résultat
-porte maintenant sa probabilité de n'être que du bruit.
+Le mémoire de 2024 cherchait à prévoir les rendements d'actions à partir de données macroéconomiques. Toutefois, son audit a montré que certaines décisions utilisaient une information mal alignée dans le temps. Les paramètres étaient également choisis trop près de la période de test et les transactions n'étaient pas entièrement facturées. Le présent projet reprend la même question en corrigeant chacun de ces points.
+
+Chaque prévision utilise seulement l'information disponible à la date de décision. Les paramètres sont choisis sur une période antérieure, puis gelés. De plus, les portefeuilles paient leurs coûts et chaque performance est comparée au nombre d'essais qui auraient pu produire un bon résultat par hasard.
+
+**Résultat principal.** Aucun des huit modèles ne bat la répartition égale, ni au Canada ni aux États-Unis. Le meilleur modèle canadien rapporte 4,1 % par an après les coûts, avec un ratio de Sharpe de 0,31, contre 11,4 % et 0,85 pour la répartition égale. Son ratio de Sharpe corrigé pour les essais multiples atteint 0,007, ou 0,195 lorsque les horizons sont rendus comparables, ce qui reste loin du seuil de 0,95. En effet, une rotation de deux à trois fois le portefeuille par mois coûte davantage que le signal extrait.
+
+Afin de montrer comment ce verdict est obtenu, nous présenterons d'abord les défauts mesurés dans le protocole de 2024. Dans un deuxième temps, nous expliquerons l'alignement temporel, la sélection des paramètres et la validation croisée. Ensuite, nous comparerons les modèles avant et après les coûts. Enfin, nous étudierons le risque de surapprentissage, les limites restantes et la procédure de reproduction.
 
 [![ci](https://github.com/Guilou001/05-memoire-2.0/actions/workflows/ci.yml/badge.svg)](https://github.com/Guilou001/05-memoire-2.0/actions/workflows/ci.yml)
 ![python](https://img.shields.io/badge/python-3.12-blue)
@@ -11,14 +14,8 @@ porte maintenant sa probabilité de n'être que du bruit.
 
 Le même contenu en PDF : [rapport/rapport.pdf](rapport/rapport.pdf).
 
-**Résultat en une phrase (mesuré, protocole complet).** Une fois l'information réellement disponible au
-moment de décider, les hyperparamètres choisis hors de la période de test et les coûts payés, **aucun des
-huit modèles ne bat le portefeuille équipondéré, ni au Canada ni aux États-Unis**. Le meilleur modèle fait
-4,1 % net par an avec un ratio de Sharpe, le rendement moyen divisé par la volatilité (annualisé), de 0,31
-et un Sharpe déflaté de 0,007 (0,195 en remettant les essais au même horizon, modélisé) ; l'équipondéré
-canadien fait 11,4 % avec un Sharpe de 0,85. La rotation, la
-somme mensuelle des variations absolues des poids du portefeuille, atteint 2 à 3 par mois et coûte plus
-que le signal extrait, exactement le mécanisme décrit par Jensen, Kelly, Malamud et Pedersen (2026).
+<details>
+<summary>Résumé en anglais</summary>
 
 *English summary.* My 2024 MSc thesis asked whether machine learning fed with macroeconomic data predicts
 Canadian and US stock returns, and whether long short portfolios built on those predictions make money.
@@ -28,6 +25,7 @@ hyperparameters selected on a pre-test validation window and then frozen, per-st
 cross-validation with embargo, net-of-cost portfolios, Newey-West t-statistics, deflated Sharpe ratios and
 the probability of backtest overfitting. Full-protocol result: net of 10 bp costs, no model beats the equal-weight benchmark in either country (best: Canadian gradient boosting, 4.1 % net CAGR, deflated Sharpe 0.01 vs 0.95 needed); turnover of 2-3 per month costs more than the signal extracted.
 
+</details>
 ## 1. Pourquoi une version 2
 
 La version 1 reproduit le mémoire à l'identique et documente quatre problèmes, chacun mesuré dans
@@ -45,7 +43,7 @@ question, les données et les familles de modèles du mémoire.
 |---|---|---|
 | Macro un mois dans le futur | La macro attachée à une date de formation est la dernière ligne **publiée** avant cette date (décalage de 2 mois, convention FRED-MD vérifiée) | `panel.py`, paramètre `macro_lag` |
 | Hyperparamètres choisis sur le test | Grilles évaluées sur 2004-2007 (entraînement 2000-2003), puis **gelées** ; 2008-2024 ne sert qu'à mesurer | `runner.py`, `select_hyperparameters` |
-| Un seul chemin de backtest | Validation croisée purgée combinatoire : 28 chemins hors échantillon avec purge, le retrait des mois d'entraînement dont l'information chevauche un bloc de test, et embargo, une marge d'un mois retirée en plus de part et d'autre de chaque bloc, d'où une **distribution** de Sharpe par modèle. Les 28 chemins sont ensuite agrégés en 8 blocs DISJOINTS avant la probabilité de suroptimisation (PBO, 500 partitions équilibrées tirées au hasard, graine fixée) : donner à la CSCV des colonnes qui se chevauchent met les mêmes mois des deux côtés de chaque partition et effondre la mesure | `validation.py`, `metrics.pbo_cscv` |
+| Un seul chemin d'évaluation | Validation croisée purgée combinatoire : 28 chemins hors échantillon avec purge, le retrait des mois d'entraînement dont l'information chevauche un bloc de test, et embargo, une marge d'un mois retirée en plus de part et d'autre de chaque bloc, d'où une **distribution** de Sharpe par modèle. Les 28 chemins sont ensuite agrégés en 8 blocs DISJOINTS avant la probabilité de suroptimisation (PBO, 500 partitions équilibrées tirées au hasard, graine fixée) : donner à la CSCV des colonnes qui se chevauchent met les mêmes mois des deux côtés de chaque partition et effondre la mesure | `validation.py`, `metrics.pbo_cscv` |
 | Coûts à zéro | 10 points de base par unité échangée, rotation mesurée, tout se lit **net** | `portfolio.py` |
 | Sharpe brut sans correction | Sharpe déflaté (Bailey et López de Prado, 2014) : la probabilité que le Sharpe survive au nombre d'essais tentés, calculée avec la variance des Sharpe mesurée entre ces essais ; t-stat de Newey-West, la statistique de test dont l'erreur type corrige l'autocorrélation et l'hétéroscédasticité des rendements mensuels | `metrics.py` |
 | Macro seule comme prédicteur | Sept caractéristiques par titre (momentum 1, 3, 6 et 12-2 mois, volatilités, rendement quotidien maximal), normalisées en rangs par date, **interagies** avec des facteurs macro appris par ACP, l'analyse en composantes principales, qui résume les dizaines de séries macro en quelques facteurs, à l'intérieur de chaque pli | `panel.py`, `models.py` |
@@ -208,7 +206,7 @@ chemins (aucune position, Sharpe non calculable), est retiré de la figure et si
 
 Comment lire cette figure : mêmes conventions que la figure canadienne. Le gradient boosting, pourtant
 meilleur modèle canadien en marche avant, a ici sa boîte entièrement à gauche de zéro : ce qu'un seul
-chemin de backtest donne, la distribution des chemins le reprend.
+chemin d'évaluation donne, la distribution des chemins le reprend.
 
 En une phrase : **avec l'information réellement disponible, des réglages choisis sans tricher et des coûts
 payés, la prédiction mensuelle macro + momentum ne bat pas un portefeuille naïf sur 2008-2024** ; c'est la
@@ -234,7 +232,7 @@ Les chiffres des tableaux ci-dessus viennent de `results/tables/walk_forward_can
 
 | Limite | Statut |
 |---|---|
-| Univers de titres survivants (les 50 titres actuels, pas ceux de l'époque) | reconnu ; hérité de la v1, un univers point-in-time exigerait des listes historiques de constituants |
+| Univers de titres survivants (les 50 titres actuels, pas ceux de l'époque) | reconnu ; hérité de la v1, un univers qui conserve la composition historique exigerait des listes historiques de constituants |
 | Pas de taille ni de fondamentaux par titre (prix seulement) | reconnu ; l'imputation propre de fondamentaux (Bryzgalova et al., 2025) est l'extension naturelle |
 | Millésime macro final (révisions non simulées) ; le décalage de publication, lui, est corrigé | reconnu ; millésimes ALFRED en extension |
 | Coûts fixes à 10 pb, sans impact de marché | modélisé ; paramètre `fee` |
